@@ -1,0 +1,990 @@
+<HTML lang="ja">
+    <head>
+        <meta charset="UTF-8">
+        <title>Image Combine</title>
+        <style>
+            .input-group {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin: 5px 0;
+                position: relative;
+            }
+            .file-controls {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .manual-controls {
+                display: none;
+                align-items: center;
+                gap: 8px;
+            }
+            .manual-controls.visible {
+                display: flex;
+            }
+            .position-control {
+                display: none;
+                align-items: center;
+                gap: 8px;
+            }
+            .scale-number, .offset-number {
+                width: 60px;
+            }
+            .anchor-select {
+                padding: 2px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background: white;
+            }
+            input[type="checkbox"] {
+                margin: 0 4px;
+            }
+            label {
+                margin-right: 8px;
+            }
+            .delete-button {
+                display: none;
+                padding: 2px 6px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background: white;
+                cursor: pointer;
+                min-width: 24px;
+                height: 24px;
+                line-height: 1;
+            }
+            .color-picker {
+                display: none;
+            }
+            .color-picker.visible {
+                display: block;
+            }
+            .color-picker-popup {
+                display: none;
+                position: absolute;
+                left: 0;
+                top: 100%;
+                background: white;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 8px;
+                z-index: 1000;
+            }
+            .color-picker-popup.visible {
+                display: block;
+            }
+            .color-preview {
+                width: 24px;
+                height: 24px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                cursor: pointer;
+                position: relative;
+                overflow: hidden;
+            }
+            .color-preview-overlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: white;
+            }
+            .fit-control {
+                display: none;
+                align-items: center;
+                gap: 4px;
+            }
+            .fit-control input[type="checkbox"] {
+                margin: 0;
+            }
+            .fit-control label {
+                margin: 0;
+            }
+            .color-label-container {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .color-label {
+                display: inline-block;
+                margin-right: 4px;
+            }
+            .color-picker-popup {
+                position: absolute;
+                background: white;
+                border: 1px solid #ccc;
+                padding: 8px;
+                border-radius: 4px;
+                z-index: 1000;
+            }
+            .slider-container {
+                display: grid;
+                grid-template-columns: 20px 150px 40px;
+                gap: 8px;
+                align-items: center;
+                margin: 4px 0;
+            }
+            .slider-label {
+                text-align: right;
+            }
+            .slider-value {
+                text-align: right;
+            }
+            input[type="range"] {
+                width: 100%;
+            }
+            .color-mode-tabs {
+                display: flex;
+                gap: 4px;
+                margin-bottom: 8px;
+            }
+            .color-mode-tab {
+                padding: 4px 8px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background: white;
+                cursor: pointer;
+            }
+            .color-mode-tab.active {
+                background: #eee;
+            }
+        </style>
+    </head>
+	<body>
+		<h1>Image Combine</h1>
+		<div id="imageInputs"></div>
+		<div id="previewContainer">
+			<canvas id="previewCanvas" width="800" height="800"></canvas>
+		</div>
+		<div id="downloadSettings" style="margin: 20px 0;">
+			<label>Download Size:</label>
+			<input type="number" id="downloadWidth" value="3000" style="width: 100px;"> x 
+			<input type="number" id="downloadHeight" value="3000" style="width: 100px;">
+			<label>
+				<input type="checkbox" id="lockAspectRatio" checked> Lock Aspect Ratio
+			</label>
+		</div>
+		<button id="download">Download</button>
+
+<script>
+			// 全てのコールバックをDOMContentLoadedイベントリスナーの中に配置
+			document.addEventListener('DOMContentLoaded', () => {
+				const imageInputsContainer = document.getElementById('imageInputs');
+				const previewContainer = document.getElementById('previewContainer');
+				const previewCanvas = document.getElementById('previewCanvas');
+				let nextInputId = 1;
+
+				// ダウンロードサイズの設定
+				const targetWidth = 1000;  // デフォルト値
+				const targetHeight = 1000; // デフォルト値
+
+				// 最初の空のファイル入力を作成
+				ensureEmptyFileInput();
+
+				// ダウンロードサイズの入力フィールドから値を取得する関数
+				function getDownloadSize() {
+					const widthInput = document.querySelector('#download-width');
+					const heightInput = document.querySelector('#download-height');
+					return {
+						width: parseInt(widthInput.value) || previewCanvas.width,
+						height: parseInt(heightInput.value) || previewCanvas.height
+					};
+				}
+
+				// プレビューの更新関数を修正
+				async function updatePreview() {
+					const ctx = previewCanvas.getContext('2d');
+					ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+					
+					// ダウンロードサイズを取得
+					const targetWidth = parseInt(document.getElementById('downloadWidth').value);
+					const targetHeight = parseInt(document.getElementById('downloadHeight').value);
+					
+					// プレビューのスケールを計算
+					const previewScale = Math.min(
+						previewCanvas.width / targetWidth,
+						previewCanvas.height / targetHeight
+					);
+					
+					const allGroups = [...document.querySelectorAll('.input-group')];
+					
+					// 順番に処理
+					for (const group of allGroups) {
+						const input = group.querySelector('input[type="file"]');
+						if(input && input.files && input.files[0]) {
+							await new Promise((resolve) => {
+								const img = new Image();
+								img.src = input.dataset.tintedImage || URL.createObjectURL(input.files[0]);
+								img.onload = () => {
+									ctx.globalCompositeOperation = 'source-over';
+									
+									const fitCheckbox = group.querySelector('input[type="checkbox"]');
+									
+									let drawWidth, drawHeight, drawX, drawY;
+									
+									if (fitCheckbox && fitCheckbox.checked) {
+										drawWidth = previewCanvas.width;
+										drawHeight = previewCanvas.height;
+										drawX = 0;
+										drawY = 0;
+									} else {
+										const scaleInput = group.querySelector('.scale-number');
+										const imageScale = scaleInput ? parseFloat(scaleInput.value) : 1;
+										
+										// 元の画像サイズを取得
+										const originalWidth = parseFloat(input.dataset.originalWidth);
+										const originalHeight = parseFloat(input.dataset.originalHeight);
+										
+										// 実際のサイズを計算
+										const fullWidth = originalWidth * imageScale;
+										const fullHeight = originalHeight * imageScale;
+										
+										// プレビュー用にスケーリング
+										drawWidth = fullWidth * previewScale;
+										drawHeight = fullHeight * previewScale;
+										
+										const selectedAnchor = group.querySelector('.anchor-select')?.value || 'C';
+										const offsetX = parseInt(group.querySelector('.offset-number:first-of-type')?.value || 0);
+										const offsetY = parseInt(group.querySelector('.offset-number:last-of-type')?.value || 0);
+
+										// アンカーポイントの位置を計算（オフセットなし）
+										let baseX, baseY;
+										switch(selectedAnchor) {
+											case 'NW': baseX = 0; baseY = 0; break;
+											case 'N': baseX = (targetWidth - fullWidth) / 2; baseY = 0; break;
+											case 'NE': baseX = targetWidth - fullWidth; baseY = 0; break;
+											case 'W': baseX = 0; baseY = (targetHeight - fullHeight) / 2; break;
+											case 'C': baseX = (targetWidth - fullWidth) / 2; baseY = (targetHeight - fullHeight) / 2; break;
+											case 'E': baseX = targetWidth - fullWidth; baseY = (targetHeight - fullHeight) / 2; break;
+											case 'SW': baseX = 0; baseY = targetHeight - fullHeight; break;
+											case 'S': baseX = (targetWidth - fullWidth) / 2; baseY = targetHeight - fullHeight; break;
+											case 'SE': baseX = targetWidth - fullWidth; baseY = targetHeight - fullHeight; break;
+										}
+
+										// オフセットを加えてからスケーリング
+										drawX = (baseX + offsetX) * previewScale;
+										drawY = (baseY + offsetY) * previewScale;
+									}
+									
+									ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+									resolve();
+								};
+								img.onerror = resolve;
+							});
+						}
+					}
+				}
+
+				// 色を画像に適用する関数
+				function applyColorToImage(img, color, imageInput) {
+					const canvas = document.createElement('canvas');
+					canvas.width = img.width;
+					canvas.height = img.height;
+					const ctx = canvas.getContext('2d');
+
+					// 色を適用
+					ctx.fillStyle = color;
+					ctx.fillRect(0, 0, canvas.width, canvas.height);
+					
+					// 画像を描画
+					ctx.globalCompositeOperation = 'multiply';
+					ctx.drawImage(img, 0, 0);
+
+					// ルファ値を適用（必要な場合）
+					const alpha = parseFloat(color.split(',')[3]);
+					if (alpha < 1) {
+						ctx.globalCompositeOperation = 'destination-in';
+						ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+						ctx.fillRect(0, 0, canvas.width, canvas.height);
+					}
+
+					imageInput.dataset.tintedImage = canvas.toDataURL();
+				}
+
+				// ファイル選択時のイベントリスナーを修正
+				function addFileChangeListener(input, colorPicker, deleteButton, fitControl, positionControl) {
+					input.addEventListener('change', () => {
+						if(input.files && input.files[0]) {
+							colorPicker.style.display = 'inline-block';
+							deleteButton.style.display = 'inline-block';
+							fitControl.style.display = 'inline-block';
+							
+							const fitCheckbox = fitControl.querySelector('input[type="checkbox"]');
+							positionControl.style.display = fitCheckbox.checked ? 'none' : 'flex';
+							
+							const img = new Image();
+							img.src = URL.createObjectURL(input.files[0]);
+							img.onload = () => {
+								input.dataset.originalWidth = img.width;
+								input.dataset.originalHeight = img.height;
+								updatePreview();
+							};
+						} else {
+							colorPicker.style.display = 'none';
+							deleteButton.style.display = 'none';
+							fitControl.style.display = 'none';
+							positionControl.style.display = 'none';
+						}
+						ensureEmptyFileInput();
+					});
+				}
+
+				// 色変更時のイベントリスナーを定義
+				function addColorChangeListener(colorPicker, fileInput) {
+					colorPicker.addEventListener('input', (e) => {
+						if(fileInput.files && fileInput.files[0]) {
+							const img = new Image();
+							img.src = URL.createObjectURL(fileInput.files[0]);
+							img.onload = () => {
+								applyColorToImage(img, e.target.value, fileInput);
+								updatePreview();
+							};
+						}
+					});
+				}
+
+				// 新しい入力グループを作成する関数
+				function createNewFileInput() {
+					const groupDiv = document.createElement('div');
+					groupDiv.className = 'input-group';
+					
+					// 削除ボタン
+					const deleteButton = document.createElement('button');
+					deleteButton.textContent = '×';
+					deleteButton.className = 'delete-button';
+					deleteButton.style.display = 'none';
+					
+					// 削除ボタンのクリックイベント
+					deleteButton.addEventListener('click', () => {
+						groupDiv.remove();
+						updatePreview();
+					});
+
+					// ファイル選択
+					const fileInput = document.createElement('input');
+					fileInput.type = 'file';
+					fileInput.accept = 'image/*';
+					fileInput.id = `image${nextInputId}`;
+					fileInput.className = 'file-input';
+
+					// ファイル選択変更イベント
+					fileInput.addEventListener('change', (e) => {
+						if (e.target.files && e.target.files[0]) {
+							// ファイルが選択された場合の処理
+							deleteButton.style.display = 'inline';
+							// ... 既存のコード ...
+						} else {
+							// ファイルが選択解除された場合の処理
+							deleteButton.click();  // 削除ボタンのクリックイベントを呼びす
+						}
+					});
+
+					// updatePreview関数を渡してカラーピッカーを作成
+					const colorPicker = createColorPicker(updatePreview);
+					colorPicker.element.style.display = 'none';
+					
+					// Auto Fitチェックボックス
+					const fitControl = document.createElement('div');
+					fitControl.className = 'fit-control';
+					fitControl.style.display = 'none';
+					
+					const fitCheckbox = document.createElement('input');
+					fitCheckbox.type = 'checkbox';
+					fitCheckbox.checked = true;
+					fitCheckbox.id = `fit${nextInputId}`;
+					
+					const fitLabel = document.createElement('label');
+					fitLabel.htmlFor = fitCheckbox.id;
+					fitLabel.textContent = 'Auto Fit';
+
+					fitControl.appendChild(fitCheckbox);
+					fitControl.appendChild(fitLabel);
+
+					// 位置とスケールのコントロール
+					const positionControl = createPositionControl(updatePreview);
+					positionControl.container.style.display = 'none';
+
+					// 要素の組み立て（削除ボタンを最初に配置）
+					groupDiv.appendChild(deleteButton);
+					groupDiv.appendChild(fileInput);
+					groupDiv.appendChild(colorPicker.element);
+					groupDiv.appendChild(fitControl);
+					groupDiv.appendChild(positionControl.container);
+
+					// Auto Fitチェックボックスの変更イベント
+					fitCheckbox.addEventListener('change', () => {
+						positionControl.container.style.display = fitCheckbox.checked ? 'none' : 'flex';
+						updatePreview();
+					});
+
+					// ファイル選択時の処理
+					addFileChangeListener(fileInput, colorPicker.element, deleteButton, fitControl, positionControl.container);
+
+					return { 
+						colorPicker: colorPicker.element,
+						newInput: fileInput, 
+						deleteButton, 
+						groupDiv, 
+						fitControl,
+						positionControl
+					};
+				}
+
+				// 最後の空の入力欄を確認/追加する関
+				function ensureEmptyFileInput() {
+					const allInputs = [...document.querySelectorAll('.input-group input[type="file"]')];
+					const hasEmptyInput = allInputs.some(input => !input.files || !input.files[0]);
+					
+					if (!hasEmptyInput) {
+						const newGroup = createNewFileInput();
+						imageInputsContainer.appendChild(newGroup.groupDiv);
+					}
+				}
+
+				// D&Dイベントハンドラの設定
+				previewContainer.addEventListener('dragover', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					previewContainer.style.borderColor = '#666';
+				});
+
+				previewContainer.addEventListener('dragleave', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					previewContainer.style.borderColor = '#ccc';
+				});
+
+				// D&Dイベントハンドラを修正
+				previewContainer.addEventListener('drop', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					previewContainer.style.borderColor = '#ccc';
+
+					const files = e.dataTransfer.files;
+					if (files && files[0] && files[0].type.startsWith('image/')) {
+						const elements = createNewFileInput();
+						
+						// ファイルを設定
+						const dataTransfer = new DataTransfer();
+						dataTransfer.items.add(files[0]);
+						elements.newInput.files = dataTransfer.files;
+
+						// changeイベントを発火
+						const changeEvent = new Event('change');
+						elements.newInput.dispatchEvent(changeEvent);
+					}
+				});
+
+				// 初期状態で1つだけ空の入力欄を作
+				createNewFileInput();
+
+				// ダウンロードボタンのイベントリスナーを追加
+				const downloadButton = document.getElementById('download');
+				downloadButton.addEventListener('click', async () => {
+					try {
+						const canvas = await generateImage();
+						const link = document.createElement('a');
+						link.download = 'combined_image.png';
+						link.href = canvas.toDataURL('image/png');
+						link.click();
+					} catch (error) {
+						console.error('Error generating image:', error);
+					}
+				});
+
+				// アスペクト比のロック機能
+				const lockAspectRatio = document.getElementById('lockAspectRatio');
+				const downloadWidth = document.getElementById('downloadWidth');
+				const downloadHeight = document.getElementById('downloadHeight');
+				
+				let aspectRatio = downloadWidth.value / downloadHeight.value;
+				
+				downloadWidth.addEventListener('input', () => {
+					if (lockAspectRatio.checked) {
+						downloadHeight.value = Math.round(downloadWidth.value / aspectRatio);
+					}
+					aspectRatio = downloadWidth.value / downloadHeight.value;
+				});
+				
+				downloadHeight.addEventListener('input', () => {
+					if (lockAspectRatio.checked) {
+						downloadWidth.value = Math.round(downloadHeight.value * aspectRatio);
+					}
+					aspectRatio = downloadWidth.value / downloadHeight.value;
+				});
+
+				// スタイルの更新
+				const style = document.createElement('style');
+				style.textContent = `
+					.input-group {
+						display: flex;
+						align-items: center;
+						gap: 8px;
+						margin: 5px 0;
+					}
+					.file-input {
+						display: inline-block;
+					}
+					.delete-button {
+						display: none;
+					}
+					.color-picker {
+						display: none;
+					}
+					.fit-control {
+						display: none;
+					}
+					.position-control {
+						display: none;
+					}
+					/* ... 他のスタイル ... */
+				`;
+				document.head.appendChild(style);
+
+				// ドラッグ&ドロップの処理
+				previewCanvas.addEventListener('dragover', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					previewCanvas.style.border = '2px dashed #000';
+				});
+
+				previewCanvas.addEventListener('dragleave', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					previewCanvas.style.border = '1px solid #000';
+				});
+
+				previewCanvas.addEventListener('drop', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					previewCanvas.style.border = '1px solid #000';
+
+					const files = [...e.dataTransfer.files].filter(file => file.type.startsWith('image/'));
+					if (files.length > 0) {
+						// 空の入力グループを探す、もしくは新しく作成す���
+						let emptyGroup = [...document.querySelectorAll('.input-group')].find(group => {
+							const input = group.querySelector('input[type="file"]');
+							return !input.files || !input.files[0];
+						});
+
+						if (!emptyGroup) {
+							const newGroup = createNewFileInput();
+							imageInputsContainer.appendChild(newGroup.groupDiv);
+							emptyGroup = newGroup.groupDiv;
+						}
+
+						// FileListオブジェクトを作成
+						const dataTransfer = new DataTransfer();
+						dataTransfer.items.add(files[0]);
+						
+						// ファイル入力にファイルを設定
+						const fileInput = emptyGroup.querySelector('input[type="file"]');
+						fileInput.files = dataTransfer.files;
+						
+						// change イントを発火
+						fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+					}
+				});
+			});
+
+			function createColorPicker(updatePreviewCallback) {  // コールバック関数を受け取る
+				const container = document.createElement('div');
+				container.className = 'color-picker';
+				
+				// ラベルとプレビューのコンテナ
+				const labelContainer = document.createElement('div');
+				labelContainer.className = 'color-label-container';
+				
+				const label = document.createElement('span');
+				label.textContent = 'Color:';
+				label.className = 'color-label';
+				
+				const preview = document.createElement('div');
+				preview.className = 'color-preview';
+				
+				const overlay = document.createElement('div');
+				overlay.className = 'color-preview-overlay';
+				overlay.style.backgroundColor = 'rgba(255,255,255,1)';
+				
+				preview.appendChild(overlay);
+
+				// カラーピッカーのポップアップ
+				const popup = document.createElement('div');
+				popup.className = 'color-picker-popup';
+				popup.style.display = 'none';
+
+				// モード切り替えタブ
+				const tabs = document.createElement('div');
+				tabs.className = 'color-mode-tabs';
+				['RGBA', 'HSVA'].forEach(mode => {
+					const tab = document.createElement('button');
+					tab.textContent = mode;
+					tab.className = 'color-mode-tab';
+					if (mode === 'RGBA') tab.classList.add('active');
+					
+					// タブクリックイベント
+					tab.addEventListener('click', () => {
+						tabs.querySelectorAll('.color-mode-tab').forEach(t => t.classList.remove('active'));
+						tab.classList.add('active');
+						slidersRGBA.style.display = mode === 'RGBA' ? 'block' : 'none';
+						slidersHSVA.style.display = mode === 'HSVA' ? 'block' : 'none';
+					});
+					
+					tabs.appendChild(tab);
+				});
+
+				// スライダーコンテナ
+				const slidersRGBA = document.createElement('div');
+				slidersRGBA.className = 'sliders-container rgba-sliders';
+				const slidersHSVA = document.createElement('div');
+				slidersHSVA.className = 'sliders-container hsva-sliders';
+				slidersHSVA.style.display = 'none';
+
+				// HSV to RGB 変換関数
+				function HSVtoRGB(h, s, v) {
+					let r, g, b;
+					const i = Math.floor(h * 6);
+					const f = h * 6 - i;
+					const p = v * (1 - s);
+					const q = v * (1 - f * s);
+					const t = v * (1 - (1 - f) * s);
+					
+					switch (i % 6) {
+						case 0: r = v; g = t; b = p; break;
+						case 1: r = q; g = v; b = p; break;
+						case 2: r = p; g = v; b = t; break;
+						case 3: r = p; g = q; b = v; break;
+						case 4: r = t; g = p; b = v; break;
+						case 5: r = v; g = p; b = q; break;
+					}
+					
+					return {
+						r: Math.round(r * 255),
+						g: Math.round(g * 255),
+						b: Math.round(b * 255)
+					};
+				}
+
+				// 色の更新関数
+				function updateColor() {
+					const activeMode = tabs.querySelector('.active').textContent;
+					if (activeMode === 'RGBA') {
+						const r = slidersRGBA.querySelector('.color-r').value;
+						const g = slidersRGBA.querySelector('.color-g').value;
+						const b = slidersRGBA.querySelector('.color-b').value;
+						const a = slidersRGBA.querySelector('.color-a').value;
+						overlay.style.backgroundColor = `rgba(${r},${g},${b},${a})`;
+					} else {
+						const h = slidersHSVA.querySelector('.color-h').value;
+						const s = slidersHSVA.querySelector('.color-s').value;
+						const v = slidersHSVA.querySelector('.color-v').value;
+						const a = slidersHSVA.querySelector('.color-a').value;
+						const rgb = HSVtoRGB(h/360, s/100, v/100);
+						overlay.style.backgroundColor = `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`;
+					}
+					
+					// 画像に色を適用
+					const inputGroup = container.closest('.input-group');
+					if (inputGroup) {
+						const fileInput = inputGroup.querySelector('input[type="file"]');
+						if (fileInput && fileInput.files && fileInput.files[0]) {
+							const tempCanvas = document.createElement('canvas');
+							const tempCtx = tempCanvas.getContext('2d');
+							const img = new Image();
+							img.src = URL.createObjectURL(fileInput.files[0]);
+							img.onload = () => {
+								tempCanvas.width = img.width;
+								tempCanvas.height = img.height;
+								
+								// 元の画像を描画
+								tempCtx.drawImage(img, 0, 0);
+								
+								// 色を適用
+								tempCtx.globalCompositeOperation = 'multiply';
+								tempCtx.fillStyle = overlay.style.backgroundColor;
+								tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+								
+								// アルファ値を適用
+								tempCtx.globalCompositeOperation = 'destination-in';
+								tempCtx.drawImage(img, 0, 0);
+								
+								// 結果を保存
+								fileInput.dataset.tintedImage = tempCanvas.toDataURL();
+								
+								// プレビューを更新
+								updatePreviewCallback();  // コールバック関数を使用
+							};
+						}
+					}
+				}
+
+				// RGBAスライダー
+				[
+					{ key: 'r', label: 'R', max: 255, step: 1, value: 255 },
+					{ key: 'g', label: 'G', max: 255, step: 1, value: 255 },
+					{ key: 'b', label: 'B', max: 255, step: 1, value: 255 },
+					{ key: 'a', label: 'A', max: 1, step: 0.01, value: 1 }
+				].forEach(channel => {
+					const container = createSlider(channel, updateColor);
+					slidersRGBA.appendChild(container);
+				});
+
+				// HSVAスライダー
+				[
+					{ key: 'h', label: 'H', max: 360, step: 1, value: 0 },
+					{ key: 's', label: 'S', max: 100, step: 1, value: 0 },
+					{ key: 'v', label: 'V', max: 100, step: 1, value: 100 },
+					{ key: 'a', label: 'A', max: 1, step: 0.01, value: 1 }
+				].forEach(channel => {
+					const container = createSlider(channel, updateColor);
+					slidersHSVA.appendChild(container);
+				});
+
+				// プレビューのクリックでポップアップを表示/非表示
+				preview.addEventListener('click', (e) => {
+					e.stopPropagation();
+					popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
+				});
+				
+				// 外クリックでポップアップを閉じる
+				document.addEventListener('click', (e) => {
+					if (!popup.contains(e.target) && !preview.contains(e.target)) {
+						popup.style.display = 'none';
+					}
+				});
+
+				// スタイルの更新
+				const style = document.createElement('style');
+				style.textContent = `
+					.color-picker-popup {
+						position: absolute;
+						background: white;
+						border: 1px solid #ccc;
+						padding: 8px;
+						border-radius: 4px;
+						z-index: 1000;
+						box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+					}
+					.color-preview {
+						width: 24px;
+						height: 24px;
+						border: 1px solid #ccc;
+						border-radius: 4px;
+						cursor: pointer;
+						position: relative;
+						overflow: hidden;
+					}
+					.color-preview:hover {
+						border-color: #999;
+					}
+					/* ... 他のスタイル ... */
+				`;
+				document.head.appendChild(style);
+
+				// 要素の組み立て
+				labelContainer.appendChild(label);
+				labelContainer.appendChild(preview);
+				container.appendChild(labelContainer);
+				container.appendChild(popup);
+				popup.appendChild(tabs);
+				popup.appendChild(slidersRGBA);
+				popup.appendChild(slidersHSVA);
+				
+				popup.style.display = 'none';
+				
+				return {
+					element: container,
+					overlay: overlay
+				};
+			}
+
+			function createSlider(channel, onChange) {
+				const container = document.createElement('div');
+				container.className = 'slider-container';
+				
+				const label = document.createElement('span');
+				label.textContent = channel.label;  // channel.labelを直接使用
+				label.className = 'slider-label';
+				
+				const slider = document.createElement('input');
+				slider.type = 'range';
+				slider.min = 0;
+				slider.max = channel.max;
+				slider.step = channel.step;
+				slider.value = channel.value;
+				slider.className = `color-${channel.key}`;
+				
+				const value = document.createElement('span');
+				value.textContent = slider.value;
+				value.className = 'slider-value';
+				
+				container.appendChild(label);
+				container.appendChild(slider);
+				container.appendChild(value);
+				
+				slider.addEventListener('input', () => {
+					value.textContent = Number(slider.value).toFixed(channel.step < 1 ? 2 : 0);
+					onChange();
+				});
+				
+				return container;
+			}
+
+			function createPositionControl(onUpdate) {
+				const container = document.createElement('div');
+				container.className = 'position-control';
+
+				// アンカーポイント選択のドロップダン
+				const anchorSelect = document.createElement('select');
+				anchorSelect.className = 'anchor-select';
+				
+				const anchorPoints = [
+					{ value: 'C', label: '中央' },
+					{ value: 'NW', label: '左上' },
+					{ value: 'N', label: '上' },
+					{ value: 'NE', label: '右上' },
+					{ value: 'W', label: '左' },
+					{ value: 'E', label: '右' },
+					{ value: 'SW', label: '左下' },
+					{ value: 'S', label: '下' },
+					{ value: 'SE', label: '右下' }
+				];
+
+				anchorPoints.forEach(point => {
+					const option = document.createElement('option');
+					option.value = point.value;
+					option.textContent = point.label;
+					anchorSelect.appendChild(option);
+				});
+
+				// オフセット入力
+				const offsetXLabel = document.createElement('span');
+				offsetXLabel.textContent = 'X:';
+				const offsetX = document.createElement('input');
+				offsetX.type = 'number';
+				offsetX.value = '0';
+				offsetX.step = '1';
+				offsetX.className = 'offset-number';
+
+				const offsetYLabel = document.createElement('span');
+				offsetYLabel.textContent = 'Y:';
+				const offsetY = document.createElement('input');
+				offsetY.type = 'number';
+				offsetY.value = '0';
+				offsetY.step = '1';
+				offsetY.className = 'offset-number';
+
+				// スケール設定
+				const scaleLabel = document.createElement('span');
+				scaleLabel.textContent = 'Scale:';
+				const scaleInput = document.createElement('input');
+				scaleInput.type = 'number';
+				scaleInput.min = '0.01';
+				scaleInput.max = '10';
+				scaleInput.value = '1';
+				scaleInput.step = '0.01';
+				scaleInput.className = 'scale-number';
+
+				// イベントリスナーを追加
+				[anchorSelect, offsetX, offsetY, scaleInput].forEach(el => {
+					el.addEventListener('input', onUpdate);
+				});
+
+				// 新しい序で要素を配置
+				container.append(
+					anchorSelect,
+					offsetXLabel, offsetX,
+					offsetYLabel, offsetY,
+					scaleLabel, scaleInput
+				);
+
+				return {
+					container,
+					anchorSelect,
+					offsetX,
+					offsetY,
+					scaleInput
+				};
+			}
+
+			async function generateImage() {
+				const canvas = document.createElement('canvas');
+				const ctx = canvas.getContext('2d');
+				
+				// ダウンロードサイズを設定
+				const targetWidth = parseInt(document.getElementById('downloadWidth').value);
+				const targetHeight = parseInt(document.getElementById('downloadHeight').value);
+				canvas.width = targetWidth;
+				canvas.height = targetHeight;
+				
+				const allGroups = [...document.querySelectorAll('.input-group')];
+				
+				// 順番に処理
+				for (const group of allGroups) {
+					const input = group.querySelector('input[type="file"]');
+					if(input && input.files && input.files[0]) {
+						await new Promise((resolve) => {
+							const img = new Image();
+							img.src = input.dataset.tintedImage || URL.createObjectURL(input.files[0]);
+							img.onload = () => {
+								ctx.globalCompositeOperation = 'source-over';
+								
+								const fitCheckbox = group.querySelector('input[type="checkbox"]');
+								
+								let drawWidth, drawHeight, drawX, drawY;
+								
+								if (fitCheckbox && fitCheckbox.checked) {
+									drawWidth = canvas.width;
+									drawHeight = canvas.height;
+									drawX = 0;
+									drawY = 0;
+								} else {
+									const scaleInput = group.querySelector('.scale-number');
+									const imageScale = scaleInput ? parseFloat(scaleInput.value) : 1;
+									
+									// 元の画像サイズを取得
+									const originalWidth = parseFloat(input.dataset.originalWidth);
+									const originalHeight = parseFloat(input.dataset.originalHeight);
+									
+									// スケールを適用したサイズを計算
+									drawWidth = originalWidth * imageScale;
+									drawHeight = originalHeight * imageScale;
+									
+									const selectedAnchor = group.querySelector('.anchor-select')?.value || 'C';
+									const offsetX = parseInt(group.querySelector('.offset-number:first-of-type')?.value || 0);
+									const offsetY = parseInt(group.querySelector('.offset-number:last-of-type')?.value || 0);
+
+									// アンカーポイントの位置を計算（オフセットなし）
+									let baseX, baseY;
+									switch(selectedAnchor) {
+										case 'NW': baseX = 0; baseY = 0; break;
+										case 'N': baseX = (canvas.width - drawWidth) / 2; baseY = 0; break;
+										case 'NE': baseX = canvas.width - drawWidth; baseY = 0; break;
+										case 'W': baseX = 0; baseY = (canvas.height - drawHeight) / 2; break;
+										case 'C': baseX = (canvas.width - drawWidth) / 2; baseY = (canvas.height - drawHeight) / 2; break;
+										case 'E': baseX = canvas.width - drawWidth; baseY = (canvas.height - drawHeight) / 2; break;
+										case 'SW': baseX = 0; baseY = canvas.height - drawHeight; break;
+										case 'S': baseX = (canvas.width - drawWidth) / 2; baseY = canvas.height - drawHeight; break;
+										case 'SE': baseX = canvas.width - drawWidth; baseY = canvas.height - drawHeight; break;
+									}
+
+									// オフセットを直接加える（スケーリング不要）
+									drawX = baseX + offsetX;
+									drawY = baseY + offsetY;
+								}
+								
+								ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+								resolve();
+							};
+							img.onerror = resolve;
+						});
+					}
+				}
+				
+				return canvas;
+			}
+		</script>
+	</body>
+</HTML>
