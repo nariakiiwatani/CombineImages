@@ -246,8 +246,9 @@
 										drawHeight = fullHeight * previewScale;
 										
 										const selectedAnchor = group.querySelector('.anchor-select')?.value || 'C';
-										const offsetX = parseInt(group.querySelector('.offset-number:first-of-type')?.value || 0);
-										const offsetY = parseInt(group.querySelector('.offset-number:last-of-type')?.value || 0);
+										const offsetInputs = group.querySelectorAll('.offset-number');
+										const offsetX = parseInt(offsetInputs[0]?.value || 0);
+										const offsetY = parseInt(offsetInputs[1]?.value || 0);
 
 										// アンカーポイントの位置を計算（オフセットなし）
 										let baseX, baseY;
@@ -953,8 +954,9 @@
 									drawHeight = originalHeight * imageScale;
 									
 									const selectedAnchor = group.querySelector('.anchor-select')?.value || 'C';
-									const offsetX = parseInt(group.querySelector('.offset-number:first-of-type')?.value || 0);
-									const offsetY = parseInt(group.querySelector('.offset-number:last-of-type')?.value || 0);
+									const offsetInputs = group.querySelectorAll('.offset-number');
+									const offsetX = parseInt(offsetInputs[0]?.value || 0);
+									const offsetY = parseInt(offsetInputs[1]?.value || 0);
 
 									// アンカーポイントの位置を計算（オフセットなし）
 									let baseX, baseY;
